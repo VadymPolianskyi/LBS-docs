@@ -21,9 +21,7 @@ API data follows `landing` → `bronze` transformation process.
     /bronze/mysite__com/posts/69/comments/data.json   # Final Bronze storage
     ```
 #### Naming Conventions for Structured Tables
-General:
-- Names follow their **original usage**, preserving formatting and conventions (e.g., *[ad_clickthrough]* instead of *[ad click through],* maintaining original compound structure). This ensures consistency with source data and established naming patterns.
-
+Names follow their **original usage**, preserving formatting and conventions (e.g., *[ad_clickthrough]* instead of *[ad click through],* maintaining original compound structure). This ensures consistency with source data and established naming patterns.
 
 Structured tables in the **Bronze Layer** are stored in **Delta format**, which has specific constraints on column naming. Delta does not allow:
 
