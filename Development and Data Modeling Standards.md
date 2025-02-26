@@ -1,14 +1,9 @@
-# Development and Data Modeling
-**???** The Data Lakehouse architecture contains 3 data layers following Medallion Architecture:
-- Bronze - raw data from various sources (starting point)
-- Silver - structured data (cleansed and pre-transformed)
-- Gold - curated, analytics-ready modeled data
-
+# Development and Data Modeling Standards
 This document defines best practices for development and data modeling across these layers, ensuring consistency, scalability, and governance. It establishes:
 - Table and column naming conventions.
 - Metadata governance and lineage tracking.
 - Dimensional modeling techniques by [Kimball](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/)
- -  Implementation of SCD Type 2 for historical data.
+-  Implementation of SCD Type 2 for historical data.
 
 ## Bronze 
 The Bronze Layer serves as the ingestion point for raw data from structured sources, flat files, and landing zone. This layer retains data in its original format with minimal transformations (no data/schema updates, only appends), ensuring data lineage and traceability for downstream processing.
@@ -26,6 +21,10 @@ API data follows `landing` → `bronze` transformation process.
     /bronze/mysite__com/posts/69/comments/data.json   # Final Bronze storage
     ```
 #### Naming Conventions for Structured Tables
+General:
+- Names follow their **original usage**, preserving formatting and conventions (e.g., *[ad_clickthrough]* instead of *[ad click through],* maintaining original compound structure). This ensures consistency with source data and established naming patterns.
+
+
 Structured tables in the **Bronze Layer** are stored in **Delta format**, which has specific constraints on column naming. Delta does not allow:
 
 - Spaces in column names.    
@@ -40,7 +39,7 @@ To comply with Delta format constraints, column names should be transformed usin
     -   Example: `Revenue ($)` → `revenue_usd`
 3.  Ensure column names start with a letter
     -   Example: `2023_sales` → `sales_2023`
-4.  Convert all column names to lowercase to maintain consistency **???**
+4.  Convert all column names to lowercase to maintain consistency
     -   Example: `UserEmail` → `user_email`
     
 By enforcing these rules, the Bronze Layer maintains compatibility with Delta Lake storage while ensuring consistency and readability for downstream processes.
@@ -48,16 +47,19 @@ By enforcing these rules, the Bronze Layer maintains compatibility with Delta La
 #### Incremental Load
 Azure Data Factory (ADF) is responsible for orchestrating incremental data ingestion across multiple sources. The ingestion pipeline is designed to handle different types of data:
 
-- **API Data**: 
-	- Managed by an Azure Function, which fetches API responses and inserts them into the Landing Zone in JSON format. ADF then schedules a Spark job to move and transform the data into the Bronze Layer.
-	- Store the last successful API request timestamp or record ID in a control table. **???**
+- **API Data**:
+	- Extraction is managed by an Azure Function, which fetches API responses and inserts them into the Landing Zone in JSON format.
+	- After this the Spark job transforms and moves the data into the Bronze Layer.
+	- As the last step, another Azure Function stores the last successful API request timestamp in a watermark table (Redis).
+ 	- The last step is to update the last successful timestamp in the watermark table. 
 
-- **Files**: 
+- **Files**:
 	- ADF ingests files directly into Bronze, using file metadata (LastModifiedDate) or partitioned folder structures to track new and modified files.
 	- Utilize ADF’s `filtering by LastModifiedDate` to process only files updated since the last ingestion.
     - Organize files in a date-based partitioned structure (`/year/month/day/`) for efficient ingestion.
-- **Structured Data (Tables)**: 
-	- ADF schedules Spark jobs to load structured data incrementally. Since source tables lack update timestamps, a high watermark approach using control tables is used to track processed records.
+
+- **Structured Data (Tables)**:
+	- The Spark job loads structured data incrementally. Since source tables lack update timestamps, a high watermark approach using control tables is used to track processed records.
 
 Incremental ingestion ensures that only new or changed records are processed, reducing resource consumption and improving efficiency.
 	
@@ -66,14 +68,14 @@ Incremental ingestion ensures that only new or changed records are processed, re
 - Immutable storage: No updates or deletions occur in this layer.
 - Partitioning: The ingestion runs once a day for each source. Data should be partitioned by ingestion date (`year/month/day`) **???** to optimize retrieval.
 
-**Metadata**
-- Administrative metadata is stored separately in `{source__system_name}__mtdt` subfolder.
+#### Metadata
+- Administrative metadata is stored separately in `{source__system_name}__mtdt` subfolder. [More details](https://dev.azure.com/azurereleasemanager/londonedu-dataplatform/_wiki/wikis/londonedu-dataplatform.wiki/5535/Storage-and-Compute?anchor=bronze-administrative-metadata)
 - Technical metadata for the data from structured sources is stored in Delta log files `_delta_log/xxxxxxx.json`.
 
 ## Silver
 The Silver Layer refines raw data from the Bronze Layer, ensuring it is validated, cleansed, deduplicated, and structured for analytical use. 
 - The structure of the table mirrors source structure
-- Data format: Delta 
+- Data format: **Delta** 
 - Data from Bronze is processed to remove duplicates, standardize formats, and enforce schema consistency.
 - Enforce business rules and apply quality checks before storing data.
 - Maintains only the latest version of each record.
@@ -81,7 +83,7 @@ The Silver Layer refines raw data from the Bronze Layer, ensuring it is validate
 #### Naming Conventions
 - Table Naming: `<original_source_table>` 
 - Columns Naming: keeps the same as in source.
-	- Column names must be lowercase and use snake_case.
+	- Column names with **lowercase** letters with **underscores** `"_"` as delimiters (e.g., `user_sessions`).
 	- Spaces, special characters (`-`, `/`, `()`) are replaced with underscores (`_`).
 	- In case of issues with `source format -> delta` mapping, check **Naming Conventions for Structured Tables** above    
 
@@ -109,13 +111,32 @@ Additional metadata is introduced in the Silver Layer to enhance data traceabili
 ## Gold
 The Gold Layer is optimized for reporting, business intelligence, and analytical workloads. It structures data into fact and dimension tables, following Kimball’s Star Schema principles and implementing Slowly Changing Dimensions (SCD Type 2) for historical tracking.
 
-#### Naming Conventions
-- Warehouse Naming: `gold_<domain>`
-- Schema Naming: `<product>`/`<business_use_case>` (e.g., `marketing`)
+### Naming Conventions
+
+The purpose of these naming conventions is to:
+
+- Enhance readability and understanding of data structures.
+- Facilitate collaboration among team members by providing a common language.
+- Simplify maintenance and updates by ensuring that all components are easily identifiable.
+- Use a consistent format throughout the platform.
+
+#### Basic Principles
+1. **Clarity and Descriptiveness**:
+    - Names should clearly indicate the purpose or content of the resource.
+    - Avoid using obscure acronyms or abbreviations unless widely recognized.
+    - **British English** is used consistently in all names, ensuring adherence to regional spelling conventions (e.g., *centre* instead of *center*, *analyse* instead of *analyze* and *metre* instead of *meter*). However, for raw data stored in the Bronze layer, the original version is retained. In the gold layer tables, all names are standardised to British English.
+    - Column names with a **maximum of 5 terms** described avoiding abbreviation
+    - Avoid using accents, spaces and other special characters, recommended only letters, numbers and underline/uderscore
+    - Ensure standardization of **date/time** fields across datasets. Use `created_at`, `updated_at`, `event_date`, `event_timestamp` instead of ambiguous names like `date`, `time`.
+ 
+#### Naming Rules
+
+- Warehouse Naming: `gold_<domain>` (e.g., `gold_marketing`)
+- Schema Naming: `<product>`/`<business_use_case>` (e.g., `brand_and_marketing`)
 - Table Naming:
     - Fact Tables: `fct_<event>` (e.g., `fct_transactions`)
     - Dimension Tables: `dim_<entity>` (e.g., `dim_customer`)
-- Column Naming:
+- General Column Naming:
     - `pk_` – Surrogate primary keys (e.g., `pk_customer_id`)
     - `fk_` – Foreign keys linking facts to dimensions (e.g., `fk_product_id`)
     - `nm_` – Name fields (e.g., `nm_product`)
@@ -124,10 +145,8 @@ The Gold Layer is optimized for reporting, business intelligence, and analytical
     - `txt_` – Text descriptions (e.g., `txt_remarks`)
     - `bool_` – Boolean flags (e.g., `bool_is_active`)
         
-#### Business Metadata ???
-TBD: Pureview
-- Aggregations and calculated measures stored in fact tables.
-- Historical tracking metadata for SCD Type 2 implementation.
+#### Business Metadata
+[TBD]: Pureview
 
 #### Star Schema
 Star schema consist of 2 types of table - facts and dimensions. It's used for Golden layer to to optimize query performance and analytical processing.
@@ -151,7 +170,7 @@ A **Dimension table** contains descriptive attributes that provide context to fa
 
 Key Components:
 -   `pk_` Surrogate Key – Unique identifier for each record version.
--   `dt_effective_start` & `dt_effective_end` – Define the validity period of a record.
+-   `dt_start_date` & `dt_end_date` – Define the validity period of a record.
 -   `bool_is_active` – Indicates the most recent active version (`TRUE/FALSE`).
 
 Example `Dim_Product`:
@@ -181,16 +200,28 @@ END
 3.  Queries always use `bool_is_active = TRUE` to retrieve the latest record.
 
 ## Notebook using
+[TBD]
 ### Best practices
 - Use commentary (md cells) 
 	- For context
 	- For easy navigation
 - Use classes and functions
 - Separate notebooks
-- Use folders and subfolders (on the Workspace level):
-	- `1 - Bronze` 
-	- `2 - Silver` 
-	- `3 - Gold`  **???**
+- Use folders and subfolders (on the Workspace level).
+Example:
+```
+.
+└── data
+| └── silver/
+|   └── {source system name}/
+|     └── {schema}/
+|       └── {table}.ipynb
+└── data-quality
+  └── silver/
+    └── {source system name}/
+      └── {schema}/
+	└── {table}.ipynb
+```
 
 ### Parameters
 Template notebooks should be parameterized to support flexible reuse:
